@@ -1,0 +1,106 @@
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  AmhBucketName:
+    Type: String
+    Description: The S3 bucket where AMH files will be stored.
+    Default: amh-bucket2
+  ImageLabelBucketName:
+    Type: String
+    Description: The S3 bucket where the image labels will be stored.
+    Default: amh-label-bucket
+  GetSignedUrlFunctionName:
+    Type: String
+    Description: The URI for the GET signed URL for image labels.
+    Default: ''
+  NotificationTopicARN:
+    Type: String
+    Description: The SNS Arn for notifications.
+    Default: ''
+  NotificationTopicName:
+    Type: String
+    Description: The SNS topic for notifications.
+    Default: ''
+
+Resources:
+  ImageReaderStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Logging:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt ImageReaderStateMachineLogGroup.Arn
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref ImageLabelBucketName
+        - S3WritePolicy:
+            BucketName: !Ref ImageLabelBucketName
+        - S3ReadPolicy:
+            BucketName: !Ref AmhBucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref NotificationTopicARN
+        - Statement:
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function/${GetSignedUrlFunctionName}
+
+        - AWSXrayWriteOnlyAccess
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogDelivery
+                - logs:GetLogDelivery
+                - logs:UpdateLogDelivery
+                - logs:DeleteLogDelivery
+                - logs:ListLogDeliveries
+                - logs:PutResourcePolicy
+                - logs:DescribeResourcePolicies
+                - logs:DescribeLogGroups
+              Resource: '*'
+            - Sid: JobPolicy
+              Effect: Allow
+              Action:
+                - rekognition:DetectLabels
+                - rekognition:StartLabelDetection
+                - rekognition:StopLabelDetection
+              Resource: '*'
+
+      Tracing:
+        Enabled: true
+      Type: STANDARD
+      DefinitionSubstitutions:
+        ImageLabelBucket: !Ref ImageLabelBucketName
+        GetSignedUri: !Ref GetSignedUrlFunctionName
+        NotificationTopic: !Ref NotificationTopicARN
+      Events:
+        S3MediaTrigger:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName: default
+            Pattern:
+              source:
+                - s3
+              detail-type:
+                - Object Created
+              detail:
+                bucket:
+                  name:
+                    - !Ref ImageLabelBucketName
+                object:
+                  key:
+                    prefix:
+                      - prefix: productImage/
+      DefinitionUri: stateMachine.asl.yaml
+
+  ImageReaderStateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub
+        - /aws/vendedlogs/states/${AWS::StackName}-${ResourceId}-Logs
+        - ResourceId: TranslateStateMachine
