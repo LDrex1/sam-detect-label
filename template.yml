@@ -9,20 +9,53 @@ Parameters:
     Type: String
     Description: The S3 bucket where the image labels will be stored.
     Default: amh-label-bucket
-  GetSignedUrlFunctionName:
-    Type: String
-    Description: The URI for the GET signed URL for image labels.
-    Default: ''
-  NotificationTopicARN:
-    Type: String
-    Description: The SNS Arn for notifications.
-    Default: ''
-  NotificationTopicName:
-    Type: String
-    Description: The SNS topic for notifications.
-    Default: ''
 
 Resources:
+  LambdaGetLabelObjectRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaS3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub arn:aws:s3:::${ImageLabelBucketName}/*
+
+  GetSignedUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GetSignedUrlFunction
+      Handler: index.handler
+      Runtime: nodejs20.x
+      CodeUri: src/
+      Timeout: 10
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref ImageLabelBucketName
+      Role: !GetAtt LambdaGetLabelObjectRole.Arn
+
+  NotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: DetectLabelTopic
+
   ImageReaderStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
@@ -43,12 +76,12 @@ Resources:
             - Effect: Allow
               Action:
                 - sns:Publish
-              Resource: !Ref NotificationTopicARN
+              Resource: !Ref NotificationTopic
         - Statement:
             - Effect: Allow
               Action:
                 - lambda:InvokeFunction
-              Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function/${GetSignedUrlFunctionName}
+              Resource: !GetAtt GetSignedUrlFunction.Arn
 
         - AWSXrayWriteOnlyAccess
         - Statement:
@@ -76,8 +109,8 @@ Resources:
       Type: STANDARD
       DefinitionSubstitutions:
         ImageLabelBucket: !Ref ImageLabelBucketName
-        GetSignedUri: !Ref GetSignedUrlFunctionName
-        NotificationTopic: !Ref NotificationTopicARN
+        GetSignedUri: !GetAtt GetSignedUrlFunction.Arn
+        NotificationTopic: !Ref NotificationTopic
       Events:
         S3MediaTrigger:
           Type: EventBridgeRule
@@ -85,22 +118,19 @@ Resources:
             EventBusName: default
             Pattern:
               source:
-                - s3
+                - aws.s3
               detail-type:
                 - Object Created
               detail:
                 bucket:
                   name:
-                    - !Ref ImageLabelBucketName
+                    - !Ref AmhBucketName
                 object:
                   key:
-                    prefix:
-                      - prefix: productImage/
+                    - prefix: productImage/
       DefinitionUri: stateMachine.asl.yaml
 
   ImageReaderStateMachineLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub
-        - /aws/vendedlogs/states/${AWS::StackName}-${ResourceId}-Logs
-        - ResourceId: TranslateStateMachine
+      LogGroupName: !Sub /aws/vendedlogs/states/${AWS::StackName}-ImageReaderStateMachine-Logs
