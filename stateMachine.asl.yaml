@@ -1,13 +1,6 @@
 Comment: Get labels from an image file
-StartAt: GetUploadImage
+StartAt: DetectLabels
 States:
-  GetUploadImage:
-    Type: Task
-    Parameters:
-      Bucket.$: $.detail.bucket.name
-      Key.$: $.detail.object.key
-    Resource: arn:aws:states:::aws-sdk:s3:getObject
-    Next: DetectLabels
   DetectLabels:
     Type: Task
     Parameters:
@@ -16,34 +9,51 @@ States:
       Image:
         S3Object:
           Bucket.$: $.detail.bucket.name
-          Name.$: $.detail.object.key #dfdf
+          Name.$: $.detail.object.key
       MaxLabels: 3
       MinConfidence: 80
+    ResultPath: "$.rekognitionResult"
     Resource: arn:aws:states:::aws-sdk:rekognition:detectLabels
     Next: Store Labels In S3
+    Catch:
+      - ErrorEquals:
+          - States.ALL
+        Next: HandleDetectionError
+  HandleDetectionError:
+    Type: Fail
+    Error: "ProcessingError"
+    Cause: "An error occurred while processing the image."
+
   Store Labels In S3:
     Type: Task
     Parameters:
       Bucket: ${ImageLabelBucket}
       Key.$: States.Format('labels/{}', $.detail.object.key)
-      Body.$: $.result.ImageLabels
+      Body.$: $.rekognitionResult.Labels
     Resource: arn:aws:states:::aws-sdk:s3:putObject
+    ResultPath: "$.labelPutResult"
     Next: FormatUri
+
   FormatUri:
     Type: Pass
-    Next: GetSignedUri
     InputPath: $
     Parameters:
       uri.$: States.Format('https://s3.{}.amazonaws.com/${ImageLabelBucket}/{}',
-        $.region, States.ArrayGetItem(States.StringSplit)($.detail.object.key,
-        '/')
+        $.region,
+        States.ArrayGetItem(States.StringSplit($.detail.object.key, '/'), 1)
+        )
+      labelKey.$: States.Format('labels/{}', $.detail.object.key)
+    ResultPath: "$.passResult"
+    Next: GetSignedUri
+
   GetSignedUri:
     Type: Task
     Resource: arn:aws:states:::lambda:invoke
     OutputPath: $.Payload
     Parameters:
       FunctionName: ${GetSignedUri}
-      Payload.$: $
+      Payload:
+        fileName.$: $.passResult.labelKey
     Retry:
       - ErrorEquals:
           - Lambda.ServiceException
@@ -55,6 +65,17 @@ States:
         BackoffRate: 2
         JitterStrategy: FULL
     Next: SendNotification
+    Catch:
+      - ErrorEquals:
+          - States.ALL
+        ResultPath: $.lambdaErrorInfo
+        Next: HandleSignedUrlError
+
+  HandleSignedUrlError:
+    Type: Fail
+    Error: "ProcessingError"
+    Cause: "Error captured: $.errorInfo.message"
+
   SendNotification:
     Type: Task
     Resource: arn:aws:states:::sns:publish
