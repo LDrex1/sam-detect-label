@@ -6,20 +6,19 @@ const s3 = new S3Client({ region: process.env.AWS_REGION });
 /**
  *
  * @param {*} event
- * @returns { statusCode, body with signedUrl, file key and expiration time}
- * on error,
- * @returns { statuscode, faliure message}
+ * @returns { statusCode, body, headers} - body with signedUrl, file key and expiration time
+ * on error, throws an error message
  */
 export const handler = async (event) => {
   const bucket = process.env.BUCKET_NAME;
   const key = event.fileName;
   if (!bucket || !key) {
-    throw new Error(`LambdaError: no bucket ot key specified`);
+    throw new Error(`LambdaError: no bucket or key specified`);
   }
 
   // get object command
   const command = new GetObjectCommand({ Bucket: bucket, Key: key });
-  const expiresIn = 3600;
+  const expiresIn = 3600; //expiry time in seconds
   try {
     const signedUrl = await getSignedUrl(s3, command, { expiresIn }); // get signed url
     console.log(event, "eventlog");
