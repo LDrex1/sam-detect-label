@@ -14,13 +14,16 @@ This project implements an **AWS Serverless Application Model (SAM)** pipeline t
 - **Amazon SNS**: Sends notifications when processing is complete.
 
 ## Project Structure
-
+```
+sam-detect-label/
 ├── src/ # Lambda function source code
 │ └── index.js # Lambda handler for generating signed URLs
+|
 │
 ├── stateMachine.asl.yml # Step Functions state machine definition
 ├── template.yml  
 └── README.md # Project documentation
+```
 
 ## Prerequisites
 
