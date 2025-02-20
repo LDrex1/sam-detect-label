@@ -40,4 +40,4 @@ This project implements an **AWS Serverless Application Model (SAM)** pipeline t
    sam deploy --guided
    ```
 
-### You can find the guide to this project in this medium link (not yet published)
+### You can find the guide to this project in this medium [link](https://medium.com/@ldrex/building-a-serverless-image-label-detection-pipeline-with-aws-sam-ee2f64d1449c)
